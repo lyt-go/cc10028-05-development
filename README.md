@@ -77,5 +77,27 @@ npm run dev
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
 
+## 送嵌入脱敏链路
+
+敏感词过滤产出供向量索引消费的脱敏成品，向量嵌入只以可消费的脱敏文本为
+计算输入，原始分块不进入嵌入：
+
+```text
+原分块 data/chunks/*_chunks.jsonl
+  └─ SensitiveFilterService.mask_chunk_set
+       ├─ data/masked/*_masked_chunks.jsonl      送嵌入脱敏分块（只含脱敏文本）
+       └─ data/masked/*_mask_credentials.jsonl   脱敏凭据（命中规则/偏移区间/版本校验值，不含命中原文）
+  └─ VectorEmbedService.embed_masked_artifacts   逐条凭据核对通过后写出
+       └─ data/vectors/*_masked_index.jsonl      带来源（分块版本/规则版本/凭据编号）的数据索引
+```
+
+- 多规则交叠命中时，命中范围全部遮盖并合并为定长占位符 `〔MASK〕`；
+  命中字符不进入向量输入，重叠原文无法通过片段拼接或凭据还原。
+- 每条规则可配置 `exact/token/guard` 左右边界，决定相邻文字是否被卷入遮盖。
+- 规则口径经 `RuleRegistry` 版本化确认，只追加不改写；规则更正与索引请求
+  并发时，在途任务可钉住上次确认的规则版本与分块版本继续核验。
+- 测试见 `backend/tests/test_masking_index.py`（交叠/单命中/无命中三段比对、
+  篡改拒绝、并发保留旧口径、重新提交后新旧模型输入命中明细比对）。
+
 领域：数据工程
 子方向：数据采集、爬虫与RPA
